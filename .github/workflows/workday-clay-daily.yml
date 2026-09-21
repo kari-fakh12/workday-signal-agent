@@ -1,0 +1,26 @@
+name: Workday-Clay Daily Digest
+
+# Every day, posts a short update to Slack:
+#   - how many companies the Workday agent sent to Clay today
+#   - how many qualified companies landed in the master list today
+# Runs two hours after the agent's own daily run.
+
+on:
+  schedule:
+    - cron: '0 10 * * *'      # 10:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Post Workday->Clay daily digest to Slack
+        env:
+          NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MNC_DB_ID: ${{ secrets.MNC_DB_ID }}
+        run: python3 digests/clay_daily_digest.py

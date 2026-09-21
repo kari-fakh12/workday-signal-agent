@@ -1,0 +1,58 @@
+name: Workday Daily Finder
+
+# Runs the Workday company discovery agent every day in the cloud,
+# so it works even when the laptop is off.
+#   - Searches myworkdayjobs.com for new Workday companies (Firecrawl)
+#   - Dedupes against the memory in state/workday-known-slugs.txt
+#   - Pushes net-new companies into Clay (if CLAY_WEBHOOK_URL is set)
+#   - Commits the master CSV + memory + send log back to the repo
+#
+# To pause: commit a file at state/STOP_WORKDAY.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'      # 08:00 UTC daily
+  workflow_dispatch: {}       # run it by hand from the Actions tab
+
+permissions:
+  contents: write             # needed so it can commit results back
+
+concurrency:
+  group: workday-daily
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Workday daily agent
+        env:
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          CONFIRM_SPEND: '1'          # real run, capped at MAX_QUERIES searches/day
+          MAX_QUERIES: '8'
+          CLAY_DEDUP_TABLES: ''       # no Clay CLI login in the cloud; dedupe via memory
+          CLAY_WEBHOOK_URL: ${{ secrets.CLAY_WEBHOOK_URL }}
+          CLAY_WEBHOOK_AUTH: ${{ secrets.CLAY_WEBHOOK_AUTH }}
+          NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
+          COMPANY_DB_ID: ${{ secrets.COMPANY_DB_ID }}
+        run: bash agent/run-workday-daily.sh
+
+      - name: Commit results back to the repo
+        run: |
+          git config user.name "workday-agent"
+          git config user.email "workday-agent@users.noreply.github.com"
+          # output/ and state/ are gitignored in the public repo, so force-add the run files
+          git add -f state/workday-known-slugs.txt output/workday-companies-MASTER.csv 2>/dev/null || true
+          git add -f state/sent-to-clay.txt state/clay-send-log.csv 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No new companies today."
+          else
+            git commit -m "Workday daily run $(date -u +%Y-%m-%d)"
+            git push
+          fi
